@@ -14,6 +14,7 @@
 set -e
 src=$(realpath "$1")
 runagent pdm-render-ini
+mkdir -p geoip
 exec podman run --rm --pod-id-file "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/parsedmarc.pod-id" \
     --env HOME=/var/lib/parsedmarc --env XDG_CACHE_HOME=/var/lib/parsedmarc/cache \
     --volume ./parsedmarc:/etc/parsedmarc:ro,z \

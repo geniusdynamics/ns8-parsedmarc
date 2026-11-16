@@ -591,6 +591,7 @@ def render_parsedmarc(settings, sh=None):
     if sh is None:
         sh = smarthost()
     os.makedirs(PDM_DIR, exist_ok=True)
+    os.makedirs(GEOIP_DIR, exist_ok=True)   # bind-mounted by the containers
     extra = _read(EXTRA_INI)
     changed = {}
 
