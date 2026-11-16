@@ -1,11 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2022 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-set -e
+# Before the backup: a consistent OpenSearch snapshot of the report indices
+# into the opensearch-snapshots volume (backed up instead of the live data
+# volume). Only the newest snapshot is kept: they are incremental.
 
-echo "Dumping kickstart postgres database"
-podman exec postgresql-app pg_dump -U postgres --format=c  kickstart > kickstart.pg_dump
+import sys
+import time
+import parsedmarc_ns8 as pdm
+
+settings = pdm.load_settings()
+if not pdm.is_bundled(settings):
+    sys.exit(0)
+try:
+    pdm.wait_for(pdm.opensearch_ready, 120, "OpenSearch")
+except Exception as ex:
+    print(pdm.agent.SD_WARNING + f"OpenSearch snapshot skipped: {ex}", file=sys.stderr)
+    sys.exit(0)
+pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}", "PUT",
+               {"type": "fs", "settings": {"location": "/usr/share/opensearch/snapshots"}})
+name = time.strftime("backup-%Y%m%d%H%M%S", time.gmtime())
+res = pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}/{name}?wait_for_completion=true", "PUT", {
+    "indices": "*dmarc*,*smtp_tls*,.kibana*,.opensearch_dashboards*",
+    "ignore_unavailable": True, "include_global_state": False}, timeout=3600)
+state = res.get("snapshot", {}).get("state")
+pdm.agent.assert_exp(state == "SUCCESS", f"snapshot {name} ended with state {state}")
+snaps = pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}/_all").get("snapshots", [])
+for snap in snaps:
+    if snap["snapshot"] != name:
+        pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}/{snap['snapshot']}", "DELETE", timeout=600, ok404=True)
+print(f"OpenSearch snapshot {name} created", file=sys.stderr)

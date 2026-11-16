@@ -1,0 +1,52 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Bundled single-node OpenSearch, security plugin on (private CA, TLS on
+# HTTP and transport, no demo users). Started only with the bundled backend.
+# The unit reports started once the cluster and the security index answer
+# and the accounts, roles and tenants are provisioned.
+#
+
+[Unit]
+Description=parsedmarc OpenSearch
+BindsTo=parsedmarc.service
+After=parsedmarc.service
+Before=dashboards-app.service grafana-app.service
+ConditionPathExists=%S/state/.opensearch-enabled
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=120
+ExecStartPre=/bin/rm -f %t/opensearch-app.pid %t/opensearch-app.ctr-id
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/opensearch-app.pid \
+    --cidfile %t/opensearch-app.ctr-id --cgroups=no-conmon \
+    --pod-id-file %t/parsedmarc.pod-id --replace -d --name opensearch-app \
+    --env "OPENSEARCH_JAVA_OPTS=-Xms${OPENSEARCH_HEAP_MB}m -Xmx${OPENSEARCH_HEAP_MB}m" \
+    --env DISABLE_INSTALL_DEMO_CONFIG=true \
+    --env DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI=true \
+    --volume ./opensearch/opensearch.yml:/usr/share/opensearch/config/opensearch.yml:ro,Z \
+    --volume ./opensearch/internal_users.yml:/usr/share/opensearch/config/opensearch-security/internal_users.yml:ro,Z \
+    --volume ./opensearch/config.yml:/usr/share/opensearch/config/opensearch-security/config.yml:ro,Z \
+    --volume ./certs/ca.pem:/usr/share/opensearch/config/certs/ca.pem:ro,z \
+    --volume ./certs/node.pem:/usr/share/opensearch/config/certs/node.pem:ro,Z \
+    --volume ./certs/node-key.pem:/usr/share/opensearch/config/certs/node-key.pem:ro,Z \
+    --volume opensearch-data:/usr/share/opensearch/data:Z,U \
+    --volume opensearch-snapshots:/usr/share/opensearch/snapshots:Z,U \
+    ${OPENSEARCH_IMAGE}
+ExecStartPost=runagent pdm-wait-ready opensearch
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/opensearch-app.ctr-id -t 100
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/opensearch-app.ctr-id
+PIDFile=%t/opensearch-app.pid
+Type=forking
+SyslogIdentifier=%N
+
+[Install]
+WantedBy=default.target

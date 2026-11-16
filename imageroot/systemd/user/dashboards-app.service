@@ -1,0 +1,41 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# OpenSearch Dashboards with the security plugin (login form, one tenant per
+# parsedmarc tenant). Reports started once it answers and the parsedmarc
+# saved objects are imported.
+#
+
+[Unit]
+Description=parsedmarc OpenSearch Dashboards
+BindsTo=parsedmarc.service
+After=parsedmarc.service opensearch-app.service
+ConditionPathExists=%S/state/.dashboards-enabled
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/dashboards-app.pid %t/dashboards-app.ctr-id
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/dashboards-app.pid \
+    --cidfile %t/dashboards-app.ctr-id --cgroups=no-conmon \
+    --pod-id-file %t/parsedmarc.pod-id --replace -d --name dashboards-app \
+    --volume ./dashboards/opensearch_dashboards.yml:/usr/share/opensearch-dashboards/config/opensearch_dashboards.yml:ro,Z \
+    --volume ./dashboards/ca.pem:/usr/share/opensearch-dashboards/config/ca.pem:ro,Z \
+    ${OPENSEARCH_DASHBOARDS_IMAGE}
+ExecStartPost=runagent pdm-wait-ready dashboards
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/dashboards-app.ctr-id -t 30
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/dashboards-app.ctr-id
+PIDFile=%t/dashboards-app.pid
+Type=forking
+SyslogIdentifier=%N
+
+[Install]
+WantedBy=default.target

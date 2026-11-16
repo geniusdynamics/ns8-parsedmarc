@@ -1,0 +1,15 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+[Unit]
+Description=Weekly MaxMind GeoLite2 download of parsedmarc
+
+[Timer]
+OnCalendar=Wed *-*-* 04:17:00
+RandomizedDelaySec=3h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

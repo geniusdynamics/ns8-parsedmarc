@@ -2,5 +2,17 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "local>NethServer/.github:ns8-automerge"
+  ],
+  "packageRules": [
+    {
+      "description": "Grafana 13 no longer bundles the Elasticsearch datasource used by the parsedmarc dashboard",
+      "matchPackageNames": ["docker.io/grafana/grafana", "grafana/grafana"],
+      "allowedVersions": "<13"
+    },
+    {
+      "description": "OpenSearch and Dashboards must share the same version",
+      "matchPackageNames": ["docker.io/opensearchproject/opensearch", "docker.io/opensearchproject/opensearch-dashboards"],
+      "groupName": "OpenSearch"
+    }
   ]
 }

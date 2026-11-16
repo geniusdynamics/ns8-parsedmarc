@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Store the settings (state/settings.json) and the secrets (0600 files in
+# state/secrets), then render every configuration file. A field missing from
+# the input keeps its value; an empty secret keeps the stored one.
+
+import json
+import os
+import sys
+import agent
+import parsedmarc_ns8 as pdm
+
+data = json.load(sys.stdin)
+settings = pdm.load_settings()
+old_tenants = {t["name"] for t in settings["tenants"]}
+settings.update({k: v for k, v in data.items() if k in pdm.DEFAULTS})
+settings["host"] = settings["host"].lower()
+if settings["backend"] != "bundled":
+    settings["dashboards_enabled"] = False
+
+for field in pdm.SECRET_FIELDS:
+    if data.get(field):
+        pdm.write_secret(field, data[field])
+
+tenants = []
+for t in data.get("tenants", settings["tenants"]):
+    entry = dict(pdm.TENANT_DEFAULTS)
+    entry.update({k: v for k, v in t.items() if k in pdm.TENANT_DEFAULTS})
+    entry["domains"] = sorted({d.lower().rstrip(".") for d in entry["domains"]})
+    for field in pdm.TENANT_SECRET_FIELDS:
+        if t.get(field):
+            pdm.write_secret(pdm.tenant_secret(entry["name"], field), t[field])
+    tenants.append(entry)
+settings["tenants"] = sorted(tenants, key=lambda t: t["name"])
+for name in old_tenants - {t["name"] for t in tenants}:
+    for field in pdm.TENANT_SECRET_FIELDS:
+        pdm.remove_secret(pdm.tenant_secret(name, field))
+pdm.save_settings(settings)
+
+p = pdm.ports()
+agent.set_env("TRAEFIK_HOST", settings["host"])
+agent.set_env("TRAEFIK_HTTP2HTTPS", settings["http2https"])
+agent.set_env("DASHBOARDS_PORT", p["dashboards"])
+agent.set_env("OPENSEARCH_PORT", p["opensearch"])
+agent.set_env("GRAFANA_PORT", p["grafana"])
+agent.set_env("OPENSEARCH_HEAP_MB", settings["opensearch_heap_mb"])
+agent.dump_env()
+
+if settings["geoip"] == "maxmind" and not os.path.exists(f"{pdm.GEOIP_DIR}/GeoLite2-Country.mmdb"):
+    try:
+        agent.run_helper("pdm-geoipupdate").check_returncode()
+    except Exception as ex:
+        print(agent.SD_WARNING + f"MaxMind download failed, the bundled database is used: {ex}", file=sys.stderr)
+
+restart = pdm.render_all(settings)
+pdm.write_file(".restart-units", "\n".join(sorted(restart)) + "\n")

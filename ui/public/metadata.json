@@ -1,19 +1,22 @@
 {
-  "name": "kickstart",
+  "name": "parsedmarc",
   "description": {
-    "en": "My kickstart module"
+    "en": "parsedmarc: DMARC aggregate, failure and SMTP TLS report analysis with OpenSearch, OpenSearch Dashboards and Grafana, multi-tenant"
   },
-  "categories": [],
+  "categories": [
+    "communication",
+    "monitoring"
+  ],
   "authors": [
     {
-      "name": "Name Surname",
-      "email": "author@yourmail.org"
+      "name": "Genius Dynamics",
+      "email": "support@genius.ke"
     }
   ],
   "docs": {
-    "documentation_url": "https://docs.kickstart.com/",
-    "bug_url": "https://github.com/NethServer/dev",
-    "code_url": "https://github.com/author/ns8-kickstart"
+    "documentation_url": "https://domainaware.github.io/parsedmarc/",
+    "bug_url": "https://github.com/geniusdynamics/ns8-parsedmarc/issues",
+    "code_url": "https://github.com/geniusdynamics/ns8-parsedmarc"
   },
-  "source": "ghcr.io/nethserver/kickstart"
+  "source": "ghcr.io/geniusdynamics/parsedmarc"
 }

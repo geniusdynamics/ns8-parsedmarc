@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Render the parsedmarc INI files again (smarthost settings may have changed)
+
+import parsedmarc_ns8 as pdm
+
+pdm.render_parsedmarc(pdm.load_settings())
