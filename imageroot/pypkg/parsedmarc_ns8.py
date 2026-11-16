@@ -325,6 +325,10 @@ def _openssl(*args):
     subprocess.run(["openssl", *args], check=True, stdout=sys.stderr, stderr=sys.stderr)
 
 
+LEAF_EXT = ("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+            "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+
+
 def ensure_certs():
     """Private CA, node certificate (127.0.0.1, localhost) and super admin
     client certificate, PKCS#8 keys (0600)"""
@@ -336,11 +340,16 @@ def ensure_certs():
         if not os.path.exists(ca):
             _openssl("genpkey", "-quiet", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:3072", "-out", cakey)
             _openssl("req", "-x509", "-new", "-key", cakey, "-sha256", "-days", "7300",
-                     "-subj", "/O=NS8/OU=parsedmarc/CN=parsedmarc-ca", "-out", ca)
+                     "-subj", "/O=NS8/OU=parsedmarc/CN=parsedmarc-ca",
+                     # Python 3.13 (parsedmarc image) verifies strictly: a CA
+                     # needs critical basicConstraints and keyUsage
+                     "-addext", "basicConstraints=critical,CA:TRUE",
+                     "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                     "-addext", "subjectKeyIdentifier=hash", "-out", ca)
         for name, subj, ext in [
             ("node", "/O=NS8/OU=parsedmarc/CN=node",
-             "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth,clientAuth\n"),
-            ("admin", "/O=NS8/OU=parsedmarc/CN=admin", "extendedKeyUsage=clientAuth\n"),
+             "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth,clientAuth\n" + LEAF_EXT),
+            ("admin", "/O=NS8/OU=parsedmarc/CN=admin", "extendedKeyUsage=clientAuth\n" + LEAF_EXT),
         ]:
             crt, key = f"{CERTS_DIR}/{name}.pem", f"{CERTS_DIR}/{name}-key.pem"
             if os.path.exists(crt):
@@ -658,7 +667,9 @@ def render_parsedmarc(settings, sh=None):
             remove_file(f"{PDM_DIR}/{f}")
     if settings["input_type"] != "gmail":
         remove_file(f"{PDM_DIR}/gmail-credentials.json")
-    write_file(f"{PDM_DIR}/import.ini", _ini(common_sections(settings)), 0o600)
+    imp = common_sections(settings)
+    imp[0][1]["fail_on_output_error"] = True   # parsedmarc-import exits non-zero
+    write_file(f"{PDM_DIR}/import.ini", _ini(imp), 0o600)
     return changed
 
 
