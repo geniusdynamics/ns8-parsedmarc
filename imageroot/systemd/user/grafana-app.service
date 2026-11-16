@@ -1,0 +1,42 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Optional Grafana with the upstream parsedmarc dashboard, under /grafana
+# behind the NS8 forward authentication (auth.proxy, X-Auth-User).
+#
+
+[Unit]
+Description=parsedmarc Grafana
+BindsTo=parsedmarc.service
+After=parsedmarc.service opensearch-app.service
+ConditionPathExists=%S/state/.grafana-enabled
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+ExecStartPre=/bin/rm -f %t/grafana-app.pid %t/grafana-app.ctr-id
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/grafana-app.pid \
+    --cidfile %t/grafana-app.ctr-id --cgroups=no-conmon \
+    --pod-id-file %t/parsedmarc.pod-id --replace -d --name grafana-app \
+    --user 1000:1000 \
+    --env GF_PATHS_CONFIG=/etc/grafana/grafana.ini \
+    --volume ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro,Z \
+    --volume ./grafana/provisioning:/etc/grafana/provisioning:ro,Z \
+    --volume grafana-data:/var/lib/grafana:Z,U \
+    ${GRAFANA_IMAGE}
+ExecStartPost=runagent pdm-wait-ready grafana
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/grafana-app.ctr-id -t 10
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/grafana-app.ctr-id
+PIDFile=%t/grafana-app.pid
+Type=forking
+SyslogIdentifier=%N
+
+[Install]
+WantedBy=default.target

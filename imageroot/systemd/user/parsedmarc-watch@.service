@@ -1,0 +1,46 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# One parsedmarc process per mailbox: %i is "default" (the main mailbox) or
+# "t-<tenant>" (a tenant mailbox). The INI (0600) is rendered again before
+# each start, with the current smarthost settings.
+#
+
+[Unit]
+Description=parsedmarc mailbox watcher %i
+BindsTo=parsedmarc.service
+After=parsedmarc.service opensearch-app.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+WorkingDirectory=%S/state
+Restart=always
+RestartSec=10
+TimeoutStopSec=90
+ExecStartPre=/bin/rm -f %t/parsedmarc-watch-%i.pid %t/parsedmarc-watch-%i.ctr-id
+ExecStartPre=/bin/mkdir -p geoip
+ExecStartPre=runagent pdm-render-ini
+ExecStart=/usr/bin/podman run --conmon-pidfile %t/parsedmarc-watch-%i.pid \
+    --cidfile %t/parsedmarc-watch-%i.ctr-id --cgroups=no-conmon \
+    --pod-id-file %t/parsedmarc.pod-id --replace -d --name parsedmarc-watch-%i \
+    --env HOME=/var/lib/parsedmarc \
+    --env XDG_CACHE_HOME=/var/lib/parsedmarc/cache \
+    --volume ./parsedmarc:/etc/parsedmarc:ro,z \
+    --volume ./geoip:/var/lib/geoip:ro,z \
+    --volume parsedmarc-data:/var/lib/parsedmarc:z,U \
+    --entrypoint /bin/sh \
+    ${PARSEDMARC_IMAGE} /etc/parsedmarc/run.sh %i
+ExecStartPost=runagent pdm-wait-ready watcher %i
+ExecReload=/usr/bin/podman kill -s HUP parsedmarc-watch-%i
+ExecStop=/usr/bin/podman stop --ignore --cidfile %t/parsedmarc-watch-%i.ctr-id -t 75
+ExecStopPost=/usr/bin/podman rm --ignore -f --cidfile %t/parsedmarc-watch-%i.ctr-id
+PIDFile=%t/parsedmarc-watch-%i.pid
+Type=forking
+SyslogIdentifier=parsedmarc-%i
+
+[Install]
+WantedBy=default.target

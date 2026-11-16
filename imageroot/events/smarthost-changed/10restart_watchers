@@ -1,0 +1,13 @@
+#!/bin/bash
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# The watchers render their INI (summary email through the smarthost)
+# before each start
+exec 1>&2
+units=$(systemctl --user list-units --plain --no-legend 'parsedmarc-watch@*' | awk '{print $1}')
+[[ -n "${units}" ]] && systemctl --user -T try-restart ${units}
+exit 0

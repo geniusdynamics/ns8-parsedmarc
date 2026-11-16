@@ -1,0 +1,43 @@
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+#
+# Pod of ns8-parsedmarc. Its user namespace maps the module user to uid 1000,
+# the user of the OpenSearch, Dashboards and parsedmarc images: the
+# containers read the 0600 files of the state directory without root.
+# Ports, published on the loopback only:
+#   DASHBOARDS_PORT -> 5601 (Traefik), OPENSEARCH_PORT -> 9200 (helpers),
+#   GRAFANA_PORT -> 3000 (Traefik, /grafana)
+# The optional children are skipped by their ConditionPathExists.
+#
+
+[Unit]
+Description=parsedmarc pod
+Requires=opensearch-app.service dashboards-app.service grafana-app.service
+Before=opensearch-app.service dashboards-app.service grafana-app.service
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+EnvironmentFile=%S/state/environment
+Restart=always
+RestartSec=10
+TimeoutStopSec=70
+ExecStartPre=/bin/rm -f %t/parsedmarc.pid %t/parsedmarc.pod-id
+ExecStartPre=/usr/bin/podman pod create --infra-conmon-pidfile %t/parsedmarc.pid \
+    --pod-id-file %t/parsedmarc.pod-id \
+    --name parsedmarc \
+    --userns=keep-id:uid=1000,gid=1000 \
+    --publish 127.0.0.1:${DASHBOARDS_PORT}:5601 \
+    --publish 127.0.0.1:${OPENSEARCH_PORT}:9200 \
+    --publish 127.0.0.1:${GRAFANA_PORT}:3000 \
+    --replace
+ExecStart=/usr/bin/podman pod start --pod-id-file %t/parsedmarc.pod-id
+ExecStop=/usr/bin/podman pod stop --ignore --pod-id-file %t/parsedmarc.pod-id -t 60
+ExecStopPost=/usr/bin/podman pod rm --ignore -f --pod-id-file %t/parsedmarc.pod-id
+PIDFile=%t/parsedmarc.pid
+Type=forking
+
+[Install]
+WantedBy=default.target

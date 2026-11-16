@@ -13,7 +13,7 @@ images=()
 # The image will be pushed to GitHub container registry
 repobase="${REPOBASE:-ghcr.io/nethserver}"
 # Configure the image name
-reponame="kickstart"
+reponame="parsedmarc"
 # Node.js 25+ no longer ships Corepack, install it from npm
 # renovate: datasource=npm packageName=corepack
 corepack_version=0.36.0
@@ -21,36 +21,36 @@ corepack_version=0.36.0
 # Create a new empty container image
 container=$(buildah from scratch)
 
-# Reuse existing nodebuilder-kickstart container, to speed up builds
-if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-kickstart; then
+# Reuse existing nodebuilder-parsedmarc container, to speed up builds
+if ! buildah containers --format "{{.ContainerName}}" | grep -q nodebuilder-parsedmarc; then
     echo "Pulling NodeJS runtime..."
-    buildah from --name nodebuilder-kickstart -v "${PWD}:/usr/src:Z" docker.io/library/node:26.13.0-slim
-    buildah run nodebuilder-kickstart sh -c "npm install -g corepack@${corepack_version} && corepack enable"
+    buildah from --name nodebuilder-parsedmarc -v "${PWD}:/usr/src:Z" docker.io/library/node:26.13.0-slim
+    buildah run nodebuilder-parsedmarc sh -c "npm install -g corepack@${corepack_version} && corepack enable"
 fi
 
 echo "Build static UI files with node..."
 buildah run \
     --workingdir=/usr/src/ui \
     --env="NODE_OPTIONS=--openssl-legacy-provider" \
-    nodebuilder-kickstart \
+    nodebuilder-parsedmarc \
     sh -c "yarn install && yarn build"
 
 # Add imageroot directory to the container image
 buildah add "${container}" imageroot /imageroot
 buildah add "${container}" ui/dist /ui
-# Setup the entrypoint, ask to reserve one TCP port with the label and set a rootless container
-# Select you image(s) with the label org.nethserver.images
-# ghcr.io/xxxxx is the GitHub container registry or your own registry or docker.io for Docker Hub
-# The image tag is set to latest by default, but can be overridden with the IMAGETAG environment variable
-# --label="org.nethserver.images=docker.io/mariadb:13.0.2 docker.io/roundcube/roundcubemail:1.6.19-apache"
-# rootfull=0 === rootless container
-# tcp-ports-demand=1 number of tcp Port to reserve , 1 is the minimum, can be udp or tcp
+# Labels:
+# - traefik@node:routeadm: routes of Dashboards and Grafana
+# - 3 TCP ports: Dashboards, OpenSearch (loopback, helpers), Grafana
+# - images: parsedmarc, the bundled OpenSearch, Dashboards and Grafana.
+#   Grafana stays on 12.x: 13 no longer bundles the Elasticsearch datasource
+#   (see renovate.json)
 buildah config --entrypoint=/ \
     --label="org.nethserver.authorizations=traefik@node:routeadm" \
-    --label="org.nethserver.tcp-ports-demand=1" \
+    --label="org.nethserver.tcp-ports-demand=3" \
     --label="org.nethserver.rootfull=0" \
     --label="org.nethserver.min-core=3.20.1" \
-    --label="org.nethserver.images=docker.io/postgres:17.11-alpine docker.io/nginx:1.31.7-alpine" \
+    --label="org.nethserver.volumes=opensearch-data opensearch-snapshots" \
+    --label="org.nethserver.images=ghcr.io/domainaware/parsedmarc:11.3.0 docker.io/opensearchproject/opensearch:3.8.0 docker.io/opensearchproject/opensearch-dashboards:3.8.0 docker.io/grafana/grafana:12.4.14" \
     "${container}"
 # Commit the image
 buildah commit "${container}" "${repobase}/${reponame}"

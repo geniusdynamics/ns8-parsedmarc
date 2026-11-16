@@ -43,7 +43,7 @@
       <cv-column :md="4" :max="4">
         <NsInfoCard
           light
-          :title="$t('status.kickstart_webapp')"
+          :title="$t('status.dashboards_webapp')"
           :description="this.host ? this.host : $t('status.not_configured')"
           :icon="Wikis32"
           :loading="loading.getConfiguration"
@@ -61,6 +61,15 @@
               @click="goToWebapp"
             >
               {{ $t("status.open_webapp") }}
+            </NsButton>
+            <NsButton
+              v-if="this.host && grafanaEnabled"
+              kind="ghost"
+              :icon="Launch20"
+              :disabled="loading.getConfiguration"
+              @click="goToGrafana"
+            >
+              {{ $t("status.open_grafana") }}
             </NsButton>
             <NsButton
               v-else
@@ -317,6 +326,7 @@ export default {
       isRedirectChecked: false,
       redirectTimeout: 0,
       host: "",
+      grafanaEnabled: false,
       status: {
         instance: "",
         services: [],
@@ -387,6 +397,9 @@ export default {
     goToWebapp() {
       window.open(`https://${this.host}`, "_blank");
     },
+    goToGrafana() {
+      window.open(`https://${this.host}/grafana/`, "_blank");
+    },
     async getConfiguration() {
       this.loading.getConfiguration = true;
       this.error.getConfiguration = "";
@@ -432,6 +445,7 @@ export default {
     getConfigurationCompleted(taskContext, taskResult) {
       const config = taskResult.output;
       this.host = config.host;
+      this.grafanaEnabled = config.grafana_enabled;
       this.loading.getConfiguration = false;
     },
     async getStatus() {

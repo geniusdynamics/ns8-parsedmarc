@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Checks the schema cannot express. Field errors for the UI.
+
+import json
+import os
+import sys
+import agent
+import parsedmarc_ns8 as pdm
+
+agent.set_weight(os.path.basename(__file__), 0)
+data = json.load(sys.stdin)
+settings = pdm.load_settings()
+settings.update({k: v for k, v in data.items() if k in pdm.DEFAULTS})
+errors = []
+
+
+def err(field, error, value=""):
+    errors.append({"field": field, "parameter": field, "value": value, "error": error})
+
+
+host = data["host"].lower()
+if host != os.environ.get("TRAEFIK_HOST", "") and agent.http_route_in_use(domain=host):
+    err("host", "domain_already_used_in_traefik", host)
+
+if settings["backend"] == "bundled":
+    if not data.get("admin_password") and not pdm.read_secret("admin_password"):
+        err("admin_password", "admin_password_required")
+else:
+    if not settings["external_hosts"].strip():
+        err("external_hosts", "external_hosts_required")
+    settings["dashboards_enabled"] = False
+
+if settings["input_type"] == "imap":
+    if not settings["imap_host"] or not settings["imap_user"]:
+        err("imap_host", "imap_required")
+    if not data.get("imap_password") and not pdm.read_secret("imap_password"):
+        err("imap_password", "password_required")
+elif settings["input_type"] == "msgraph":
+    if not settings["msgraph_client_id"]:
+        err("msgraph_client_id", "required")
+    if settings["msgraph_auth_method"] == "ClientSecret" and not (settings["msgraph_tenant_id"] and settings["msgraph_mailbox"]):
+        err("msgraph_tenant_id", "required")
+elif settings["input_type"] == "gmail":
+    creds = data.get("gmail_credentials") or pdm.read_secret("gmail_credentials")
+    try:
+        json.loads(creds)
+    except Exception:
+        err("gmail_credentials", "invalid_json")
+    if not settings["gmail_delegated_user"]:
+        err("gmail_delegated_user", "required")
+
+if settings["geoip"] == "maxmind":
+    if not settings["maxmind_account_id"]:
+        err("maxmind_account_id", "required")
+    if not data.get("maxmind_license_key") and not pdm.read_secret("maxmind_license_key"):
+        err("maxmind_license_key", "required")
+
+seen_names, seen_domains = set(), {}
+for idx, t in enumerate(settings["tenants"]):
+    name = t["name"]
+    if name in pdm.RESERVED_TENANTS:
+        err(f"tenants.{idx}.name", "tenant_name_reserved", name)
+    if name in seen_names:
+        err(f"tenants.{idx}.name", "tenant_name_duplicated", name)
+    seen_names.add(name)
+    for d in t.get("domains", []):
+        d = d.lower()
+        if d in seen_domains:
+            err(f"tenants.{idx}.domains", "domain_in_two_tenants", d)
+        seen_domains[d] = name
+    if t.get("mailbox_enabled"):
+        if not t.get("imap_host") or not t.get("imap_user"):
+            err(f"tenants.{idx}.imap_host", "imap_required", name)
+        if not t.get("imap_password") and not pdm.read_secret(pdm.tenant_secret(name, "imap_password")):
+            err(f"tenants.{idx}.imap_password", "password_required", name)
+
+if errors:
+    agent.set_status("validation-failed")
+    json.dump(errors, fp=sys.stdout)
+    sys.exit(3)

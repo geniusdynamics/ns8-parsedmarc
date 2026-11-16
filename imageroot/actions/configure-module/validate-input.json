@@ -1,35 +1,462 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "title": "Configure kickstart",
-    "$id": "http://nethserver.org/json-schema/task/input/kickstart/configure-module",
-    "description": "Configure kickstart",
-    "examples": [
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Configure parsedmarc",
+  "$id": "http://nethserver.org/json-schema/task/input/parsedmarc/configure-module",
+  "description": "Configure parsedmarc: storage backend, dashboards, mailboxes, outputs and tenants. Secret fields are write-only: an omitted or empty secret keeps its current value.",
+  "examples": [
+    {
+      "host": "dmarc.example.org",
+      "http2https": true,
+      "lets_encrypt": false,
+      "backend": "bundled",
+      "admin_password": "Use-A-Long-Passphrase-2026",
+      "input_type": "imap",
+      "imap_host": "imap.example.org",
+      "imap_port": 993,
+      "imap_ssl": true,
+      "imap_user": "dmarc@example.org",
+      "imap_password": "secret",
+      "tenants": [
         {
-            "host": "kickstart.domain.org",
-            "http2https": true,
-            "lets_encrypt": true
+          "name": "acme",
+          "domains": [
+            "acme.example"
+          ],
+          "password": "Another-Long-Passphrase"
         }
-    ],
-    "type": "object",
-    "required": [
-        "host"
-    ],
-    "properties": {
-        "host": {
-            "type": "string",
-            "description": "Host name for the application, like 'kickstart.domain.org'",
-            "format": "hostname",
-            "pattern": "\\."
-        },
-        "lets_encrypt": {
-            "type": "boolean",
-            "title": "Let's Encrypt certificate",
-            "description": "Request a valid Let's Encrypt certificate."
-        },
-        "http2https": {
-            "type": "boolean",
-            "title": "HTTP to HTTPS redirection",
-            "description": "Redirect all the HTTP requests to HTTPS"
-        }
+      ]
     }
+  ],
+  "type": "object",
+  "required": [
+    "host"
+  ],
+  "properties": {
+    "host": {
+      "type": "string",
+      "format": "hostname",
+      "pattern": "\\.",
+      "description": "Host name of the dashboards, like 'dmarc.example.org'"
+    },
+    "http2https": {
+      "type": "boolean"
+    },
+    "lets_encrypt": {
+      "type": "boolean"
+    },
+    "backend": {
+      "type": "string",
+      "enum": [
+        "bundled",
+        "external"
+      ]
+    },
+    "opensearch_heap_mb": {
+      "type": "integer",
+      "minimum": 256,
+      "maximum": 32768
+    },
+    "external_type": {
+      "type": "string",
+      "enum": [
+        "opensearch",
+        "elasticsearch"
+      ]
+    },
+    "external_hosts": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Comma separated URLs, like https://es.example.org:9200"
+    },
+    "external_user": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "external_password": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "external_ssl": {
+      "type": "boolean"
+    },
+    "external_skip_verify": {
+      "type": "boolean"
+    },
+    "retention_days": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 36500
+    },
+    "dashboards_enabled": {
+      "type": "boolean"
+    },
+    "grafana_enabled": {
+      "type": "boolean"
+    },
+    "admin_password": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^($|.{10,})$",
+      "description": "Password of the 'admin' user of OpenSearch Dashboards"
+    },
+    "save_aggregate": {
+      "type": "boolean"
+    },
+    "save_failure": {
+      "type": "boolean"
+    },
+    "save_smtp_tls": {
+      "type": "boolean"
+    },
+    "strip_attachment_payloads": {
+      "type": "boolean"
+    },
+    "geoip": {
+      "type": "string",
+      "enum": [
+        "bundled",
+        "ipinfo",
+        "maxmind"
+      ]
+    },
+    "ipinfo_token": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "maxmind_account_id": {
+      "type": "string",
+      "pattern": "^[0-9]{0,12}$"
+    },
+    "maxmind_license_key": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "nameservers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "dns_timeout": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 60
+    },
+    "offline": {
+      "type": "boolean"
+    },
+    "n_procs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32
+    },
+    "log_level": {
+      "type": "string",
+      "enum": [
+        "silent",
+        "warnings",
+        "verbose",
+        "debug"
+      ]
+    },
+    "input_type": {
+      "type": "string",
+      "enum": [
+        "none",
+        "imap",
+        "msgraph",
+        "gmail"
+      ]
+    },
+    "imap_host": {
+      "type": "string",
+      "maxLength": 253
+    },
+    "imap_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "imap_ssl": {
+      "type": "boolean"
+    },
+    "imap_skip_verify": {
+      "type": "boolean"
+    },
+    "imap_user": {
+      "type": "string",
+      "maxLength": 320
+    },
+    "imap_password": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "reports_folder": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "archive_folder": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "watch": {
+      "type": "boolean"
+    },
+    "poll_interval": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1440
+    },
+    "delete": {
+      "type": "boolean"
+    },
+    "msgraph_auth_method": {
+      "type": "string",
+      "enum": [
+        "ClientSecret",
+        "UsernamePassword"
+      ]
+    },
+    "msgraph_client_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "msgraph_tenant_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "msgraph_mailbox": {
+      "type": "string",
+      "maxLength": 320
+    },
+    "msgraph_user": {
+      "type": "string",
+      "maxLength": 320
+    },
+    "msgraph_client_secret": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "msgraph_password": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "gmail_credentials": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "Google service account key (JSON)"
+    },
+    "gmail_delegated_user": {
+      "type": "string",
+      "maxLength": 320
+    },
+    "email_enabled": {
+      "type": "boolean"
+    },
+    "email_to": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "email"
+      }
+    },
+    "email_from": {
+      "type": "string",
+      "pattern": "^($|[^@\\s]+@[^@\\s]+)$"
+    },
+    "email_subject": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "kafka_enabled": {
+      "type": "boolean"
+    },
+    "kafka_hosts": {
+      "type": "string",
+      "maxLength": 2048
+    },
+    "kafka_user": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "kafka_password": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "kafka_ssl": {
+      "type": "boolean"
+    },
+    "kafka_aggregate_topic": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "kafka_failure_topic": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "kafka_smtp_tls_topic": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "s3_enabled": {
+      "type": "boolean"
+    },
+    "s3_bucket": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "s3_path": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "s3_region": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "s3_endpoint": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^($|https?://)"
+    },
+    "s3_access_key_id": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "s3_secret_access_key": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "syslog_enabled": {
+      "type": "boolean"
+    },
+    "syslog_server": {
+      "type": "string",
+      "maxLength": 253
+    },
+    "syslog_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "syslog_protocol": {
+      "type": "string",
+      "enum": [
+        "udp",
+        "tcp",
+        "tls"
+      ]
+    },
+    "webhook_enabled": {
+      "type": "boolean"
+    },
+    "webhook_aggregate_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^($|https?://)"
+    },
+    "webhook_failure_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^($|https?://)"
+    },
+    "webhook_smtp_tls_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^($|https?://)"
+    },
+    "webhook_timeout": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600
+    },
+    "splunk_enabled": {
+      "type": "boolean"
+    },
+    "splunk_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^($|https?://)"
+    },
+    "splunk_token": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "splunk_index": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "splunk_skip_verify": {
+      "type": "boolean"
+    },
+    "tenants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "domains"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]{1,30}$",
+            "description": "Tenant name, also the index prefix"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "hostname",
+              "pattern": "\\."
+            }
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^($|.{10,})$",
+            "description": "Dashboards password of the tenant user (write-only)"
+          },
+          "mailbox_enabled": {
+            "type": "boolean"
+          },
+          "imap_host": {
+            "type": "string",
+            "maxLength": 253
+          },
+          "imap_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "imap_ssl": {
+            "type": "boolean"
+          },
+          "imap_skip_verify": {
+            "type": "boolean"
+          },
+          "imap_user": {
+            "type": "string",
+            "maxLength": 320
+          },
+          "imap_password": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "reports_folder": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "archive_folder": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "delete": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
 }
