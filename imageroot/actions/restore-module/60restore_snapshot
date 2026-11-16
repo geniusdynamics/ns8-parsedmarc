@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Restore the report indices from the newest snapshot of the restored
+# opensearch-snapshots volume. The mailbox watchers stop meanwhile; indices
+# they created since the start are replaced by the snapshot copies.
+# The saved objects are imported again by Dashboards (not restored).
+
+import subprocess
+import sys
+import parsedmarc_ns8 as pdm
+
+settings = pdm.load_settings()
+if not pdm.is_bundled(settings) or not settings["host"]:
+    sys.exit(0)
+pdm.wait_for(pdm.opensearch_ready, 600, "OpenSearch")
+pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}", "PUT",
+               {"type": "fs", "settings": {"location": "/usr/share/opensearch/snapshots"}})
+snap = pdm.latest_snapshot()
+if not snap:
+    print("No OpenSearch snapshot to restore", file=sys.stderr)
+    sys.exit(0)
+watchers = [f"parsedmarc-watch@{i}.service" for i in pdm.mailbox_instances(settings)]
+if watchers:
+    subprocess.run(["systemctl", "--user", "stop", *watchers], check=False)
+info = pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}/{snap}")["snapshots"][0]
+wanted = [i for i in info["indices"] if not i.startswith(".")]
+existing = {r["index"] for r in pdm.os_request("/_cat/indices?format=json&h=index")}
+for index in wanted:
+    if index in existing:
+        pdm.os_request(f"/{index}", "DELETE", ok404=True)
+if wanted:
+    res = pdm.os_request(f"/_snapshot/{pdm.SNAPSHOT_REPO}/{snap}/_restore?wait_for_completion=true", "POST", {
+        "indices": ",".join(wanted), "include_global_state": False}, timeout=3600)
+    print(f"Restored {len(wanted)} indices from snapshot {snap}: {res.get('snapshot', {}).get('shards')}",
+          file=sys.stderr)
+if watchers:
+    subprocess.run(["systemctl", "--user", "start", *watchers], check=False)

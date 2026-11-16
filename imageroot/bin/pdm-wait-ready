@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# ExecStartPost of the units: return once the service answers.
+#   opensearch: cluster and security index ready, then accounts, roles,
+#               tenants, retention and snapshot repository provisioned
+#   dashboards: /api/status answers, then the saved objects imported
+#   grafana:    /api/health answers
+#   watcher X:  the parsedmarc process is still running after a while
+#               (a configuration error stops it at once)
+
+import subprocess
+import sys
+import time
+import urllib.request
+import parsedmarc_ns8 as pdm
+
+what = sys.argv[1]
+settings = pdm.load_settings()
+if what == "opensearch":
+    pdm.wait_for(pdm.opensearch_ready, 840, "OpenSearch")
+    pdm.provision_opensearch(settings)
+elif what == "dashboards":
+    pdm.wait_for(pdm.dashboards_ready, 840, "OpenSearch Dashboards")
+    pdm.provision_dashboards(settings)
+elif what == "grafana":
+    url = f"http://127.0.0.1:{pdm.ports()['grafana']}/grafana/api/health"
+    pdm.wait_for(lambda: urllib.request.urlopen(url, timeout=10).status == 200, 280, "Grafana")
+elif what == "watcher":
+    name = f"parsedmarc-watch-{sys.argv[2]}"
+    for _ in range(5):
+        time.sleep(2)
+        state = subprocess.run(["podman", "inspect", "-f", "{{.State.Running}}", name],
+                               capture_output=True, text=True).stdout.strip()
+        if state != "true":
+            sys.exit(f"{name} stopped: see its log")

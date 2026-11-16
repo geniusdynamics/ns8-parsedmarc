@@ -1,0 +1,24 @@
+#!/bin/bash
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Parse local report files (aggregate, failure, SMTP TLS: XML, gzip, zip,
+# eml, mbox) with the parsedmarc CLI into the configured outputs. The
+# tenant domain map applies. Usage:
+#   runagent -m parsedmarc1 parsedmarc-import /path/to/dir-or-file
+# The path must be readable by the module user.
+
+set -e
+src=$(realpath "$1")
+runagent pdm-render-ini
+mkdir -p geoip
+exec podman run --rm --pod-id-file "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/parsedmarc.pod-id" \
+    --env HOME=/var/lib/parsedmarc --env XDG_CACHE_HOME=/var/lib/parsedmarc/cache \
+    --volume ./parsedmarc:/etc/parsedmarc:ro,z \
+    --volume ./geoip:/var/lib/geoip:ro,z \
+    --volume parsedmarc-data:/var/lib/parsedmarc:z,U \
+    --volume "${src}:/import:ro,z" \
+    "${PARSEDMARC_IMAGE}" -c /etc/parsedmarc/import.ini -r /import

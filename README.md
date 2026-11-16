@@ -1,172 +1,228 @@
-# ns8-kickstart
+# ns8-parsedmarc
 
-This is a template module for [NethServer 8](https://github.com/NethServer/ns8-core).
-To start a new module from it:
-
-1. Click on [Use this template](https://github.com/NethServer/ns8-kickstart/generate).
-   Name your repo with `ns8-` prefix (e.g. `ns8-mymodule`). 
-   Do not end your module name with a number, like ~~`ns8-baaad2`~~!
-
-1. Clone the repository, enter the cloned directory and
-   [configure your GIT identity](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup#_your_identity)
-
-1. Rename some references inside the repo:
-   ```
-   modulename=$(basename $(pwd) | sed 's/^ns8-//') &&
-   git mv imageroot/systemd/user/kickstart.service imageroot/systemd/user/${modulename}.service &&
-   git mv imageroot/systemd/user/kickstart-app.service imageroot/systemd/user/${modulename}-app.service && 
-   git mv tests/kickstart.robot tests/${modulename}.robot &&
-   sed -i "s/kickstart/${modulename}/g" $(find .github/ * -type f) &&
-   git commit -a -m "Repository initialization"
-   ```
-
-1. Edit this `README.md` file, by replacing this section with your module
-   description
-
-1. Adjust `.github/workflows` to your needs. `clean-registry.yml` might
-   need the proper list of image names to work correctly. Unused workflows
-   can be disabled from the GitHub Actions interface.
-
-1. Commit and push your local changes
+[parsedmarc](https://domainaware.github.io/parsedmarc/) for NethServer 8: it
+reads DMARC aggregate, failure (forensic) and SMTP TLS reports from mailboxes,
+stores them in OpenSearch (or an external Elasticsearch/OpenSearch) and shows
+them in OpenSearch Dashboards and Grafana, with one view per tenant.
 
 ## Install
 
-Instantiate the module with:
+    add-module ghcr.io/geniusdynamics/parsedmarc:latest 1
 
-    add-module ghcr.io/nethserver/kickstart:latest 1
+Then open the module Settings page, or:
 
-The output of the command will return the instance name.
-Output example:
+    api-cli run module/parsedmarc1/configure-module --data '{
+      "host": "dmarc.example.org", "lets_encrypt": true,
+      "backend": "bundled", "admin_password": "a-long-passphrase",
+      "input_type": "imap", "imap_host": "imap.example.org", "imap_port": 993,
+      "imap_ssl": true, "imap_user": "dmarc@example.org", "imap_password": "..."
+    }'
 
-    {"module_id": "kickstart1", "image_name": "kickstart", "image_url": "ghcr.io/nethserver/kickstart:latest"}
+`get-configuration` returns every setting without secrets: each secret shows
+as `<name>_set` (`admin_password_set`, `imap_password_set`, ...). A secret left
+empty in `configure-module` keeps its stored value.
 
-## Configure
+## Hardware requirements
 
-Let's assume that the mattermost instance is named `kickstart1`.
+| Setup | RAM | Disk |
+|---|---|---|
+| Bundled OpenSearch + Dashboards (default, 1 GiB heap) | 4 GB free | 10 GB + about 1 GB per million aggregate records |
+| + Grafana | + 200 MB | |
+| External backend (parsedmarc only) | 300 MB per mailbox | small |
 
-Launch `configure-module`, by setting the following parameters:
-- `host`: a fully qualified domain name for the application
-- `http2https`: enable or disable HTTP to HTTPS redirection (true/false)
-- `lets_encrypt`: enable or disable Let's Encrypt certificate (true/false)
+- The OpenSearch container uses about twice its heap (`opensearch_heap_mb`,
+  default 1024). Dashboards uses about 600 MB to 1 GB.
+- `vm.max_map_count`: the module is rootless and cannot change kernel
+  settings. OpenSearch runs with `node.store.allow_mmap: false` (NIO file
+  store) and as a single node, where the bootstrap checks are not enforced,
+  so the default 65530 is fine. An administrator may still raise it
+  (`sysctl -w vm.max_map_count=262144`) for slightly better performance, but
+  the module does not depend on it.
+- One shard per report type and day: with years of data, raise
+  `cluster.max_shards_per_node`, or set a retention.
 
+## Storage backend
 
-Example:
+- **Bundled OpenSearch** (default, Apache 2.0 licence): one node in the
+  module pod, the security plugin on, TLS on HTTP and transport with a
+  private CA made at the first configuration (`state/certs`). The demo users
+  of the image are replaced: accounts are created through the REST API with
+  the admin client certificate. Accounts: `admin` (your Dashboards login,
+  `admin_password`), `parsedmarc` (writes the report indices only),
+  `kibanaserver`, `grafana` (read only), one per tenant. Generated passwords
+  live in `state/secrets` (0600). The API is published on `127.0.0.1` only.
+- **External**: `external_type` (`opensearch` or `elasticsearch`),
+  `external_hosts` (comma separated URLs), user and password,
+  `external_ssl`, `external_skip_verify`. OpenSearch Dashboards is not
+  bundled then: import the upstream
+  [saved objects](https://github.com/domainaware/parsedmarc/tree/master/dashboards)
+  into your Kibana or Dashboards.
 
-```
-api-cli run configure-module --agent module/kickstart1 --data - <<EOF
-{
-  "host": "kickstart.domain.com",
-  "http2https": true,
-  "lets_encrypt": false
-}
-EOF
-```
+## Retention
 
-The above command will:
-- start and configure the kickstart instance
-- configure a virtual host for trafik to access the instance
+`retention_days` (bundled backend) installs the ISM policy
+`parsedmarc-retention`: an index is deleted that many days after it was
+created. parsedmarc writes one index per day of report, so this is close to
+retention by report date, but a late report creates a new index that lives
+the full period. 0 keeps everything.
 
-## Get the configuration
-You can retrieve the configuration with
+## Dashboards
 
-```
-api-cli run get-configuration --agent module/kickstart1
-```
+- **OpenSearch Dashboards** at `https://<host>/`, Traefik route with Let's
+  Encrypt and HTTP to HTTPS. Login: the OpenSearch security plugin, user
+  `admin` or a tenant user. The upstream parsedmarc dashboards (aggregate,
+  failure, SMTP TLS) are imported at every start in the Global tenant (index
+  patterns `*dmarc_aggregate*`, `*dmarc_f*`, `*smtp_tls*`, all tenants) and in
+  each tenant (its own prefix).
+  NS8 forward authentication is not used here: tenant users are not NS8
+  users, and Dashboards needs its own session to select the tenant.
+- **Grafana** (`grafana_enabled`) at `https://<host>/grafana/`, with the
+  upstream "DMARC Reports" dashboard and one pair of datasources per tenant
+  (`<tenant> dmarc-ag`, `<tenant> dmarc-fo`, and `All ...`), selected in the
+  dashboard variables. Authentication: NS8 forward authentication (the
+  cluster administrators, as for the Rspamd UI of ns8-mail), passed to
+  Grafana with `auth.proxy`.
 
-## Uninstall
+### Why not the Grafana of ns8-metrics
 
-To uninstall the instance:
+ns8-metrics does accept datasources and dashboards from other modules: a
+module writes `module/<id>/metrics_datasources` (YAML) and
+`module/<id>/metrics_dashboards` (JSON) and fires
+`metrics-datasource-changed` / `metrics-dashboard-changed`. It is not used
+because:
 
-    remove-module --no-preserve kickstart1
+1. its Grafana (13.x) no longer bundles the Elasticsearch datasource, and
+   plugin installation is disabled, so the parsedmarc dashboard cannot query
+   anything;
+2. the datasource YAML, with the OpenSearch password, would be stored in
+   Redis, readable by every module;
+3. that Grafana runs on the leader node only, while the OpenSearch API of
+   this module listens on the loopback of its own node.
 
-## Update
+The bundled Grafana stays on 12.x for the same reason (see `renovate.json`).
 
-To Update the instance:
+## Mailboxes
 
-    api-cli run update-module --data '{"module_url":"ghcr.io/nethserver/kickstart:latest","instances":["kickstart1"],"force":true}'
+- **Main mailbox** (`input_type`):
+  - `imap`: `imap_host`, `imap_port`, `imap_ssl` (implicit TLS; off uses
+    STARTTLS), `imap_skip_verify`, `imap_user`, `imap_password`;
+  - `msgraph` (Microsoft 365): `msgraph_auth_method` `ClientSecret` or
+    `UsernamePassword`, client ID, client secret, tenant ID, mailbox;
+  - `gmail`: a service account key JSON (`gmail_credentials`) with domain-wide
+    delegation and `gmail_delegated_user`;
+  - common: `reports_folder`, `archive_folder`, `delete` (else archive),
+    `watch` (IMAP IDLE / polling; off: a run every `poll_interval` minutes).
+- **NS8 mail**: the "Pick a mail server" button lists the modules of the
+  cluster that publish the `imap` service (ns8-mail: VPN address, port 143,
+  STARTTLS). The mailbox user and password are typed in: mailbox lists of
+  ns8-mail need a mail admin role this module does not request.
+- Each mailbox runs its own parsedmarc process,
+  `parsedmarc-watch@<name>.service` (`default`, `t-<tenant>`).
+- Local files: `runagent -m parsedmarc1 parsedmarc-import <dir>` parses
+  report files (XML, gz, zip, eml, mbox) from a directory readable by the
+  module user, for example under `/home/parsedmarc1/.config/state`.
 
-## Smarthost setting discovery
+## Multi-tenant
 
-Some configuration settings, like the smarthost setup, are not part of the
-`configure-module` action input: they are discovered by looking at some
-Redis keys.  To ensure the module is always up-to-date with the
-centralized [smarthost
-setup](https://nethserver.github.io/ns8-core/core/smarthost/) every time
-kickstart starts, the command `bin/discover-smarthost` runs and refreshes
-the `state/smarthost.env` file with fresh values from Redis.
+Tenants are managed on the Tenants page (add, edit, remove) or in the
+`tenants` list of `configure-module`:
 
-Furthermore if smarthost setup is changed when kickstart is already
-running, the event handler `events/smarthost-changed/10reload_services`
-restarts the main module service.
+    {"name": "acme", "domains": ["acme.example"], "password": "...",
+     "mailbox_enabled": false}
 
-See also the `systemd/user/kickstart.service` file.
+- The domains of all tenants make the parsedmarc `index_prefix_domain_map`:
+  reports of a tenant's domain are stored in `<tenant>_dmarc_aggregate-*`,
+  `<tenant>_dmarc_failure-*`, `<tenant>_smtp_tls-*`; other domains in the
+  unprefixed indices.
+- A tenant with its own mailbox (`mailbox_enabled`, IMAP fields,
+  `imap_password`) is read by its own process with `index_prefix =
+  <tenant>_`: everything in that mailbox goes to the tenant, whatever the
+  domain.
+- With `password`, a tenant user `<tenant>` is created in OpenSearch with
+  read access to its own indices only and a Dashboards tenant of the same
+  name, where the dashboards are imported with its index patterns.
+- Removing a tenant removes its user, role and Dashboards tenant; the indices
+  stay (delete them, or let the retention do it).
 
-This setting discovery is just an example to understand how the module is
-expected to work: it can be rewritten or discarded completely.
+Limits:
 
-## Debug
+- A domain belongs to one tenant only; subdomains follow their base domain.
+- With the domain map, upstream drops the SMTP TLS reports of domains no
+  tenant lists.
+- Tenant names: 2 to 31 lowercase letters and digits.
+- Tenants exist only with the bundled backend's security. With an external
+  backend the prefixes are written, but users and permissions are yours.
+- Grafana is for the cluster administrators: every datasource is visible
+  there.
+- Index suffixes are not offered; `index_suffix` can be set in the extra INI.
 
-some CLI are needed to debug
+## Report types and enrichment
 
-- The module runs under an agent that initiate a lot of environment variables (in /home/kickstart1/.config/state), it could be nice to verify them
-on the root terminal
+`save_aggregate`, `save_failure` (failure reports may contain personal data),
+`save_smtp_tls`, `strip_attachment_payloads`; `geoip`: `bundled` (the IPinfo
+Lite database shipped with parsedmarc, updated online), `ipinfo`
+(`ipinfo_token`) or `maxmind` (`maxmind_account_id`,
+`maxmind_license_key`: GeoLite2 Country downloaded at configuration and
+weekly by `parsedmarc-geoipupdate.timer`); `nameservers`, `dns_timeout`,
+`offline`, `n_procs`, `log_level` (`silent`, `warnings`, `verbose`,
+`debug`). Logs: the module log, identifiers `parsedmarc-<mailbox>`,
+`opensearch-app`, `dashboards-app`, `grafana-app`.
 
-    `runagent -m kickstart1 env`
+## Summary email
 
-- you can become runagent for testing scripts and initiate all environment variables
-  
-    `runagent -m kickstart1`
+`email_enabled`, `email_to`, `email_from`, `email_subject`: parsedmarc sends
+the results of each run with new reports through the cluster smarthost
+(Settings > Smarthost of NS8). The watchers restart on `smarthost-changed`.
 
- the path become : 
-```
-    echo $PATH
-    /home/kickstart1/.config/bin:/usr/local/agent/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/
-```
+## Other outputs
 
-- if you want to debug a container or see environment inside
- `runagent -m kickstart1`
- ```
-podman ps
-CONTAINER ID  IMAGE                                      COMMAND               CREATED        STATUS        PORTS                    NAMES
-d292c6ff28e9  localhost/podman-pause:4.6.1-1702418000                          9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  80b8de25945f-infra
-d8df02bf6f4a  docker.io/library/postgres:15.5-alpine3.19          --character-set-s...  9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  postgresql-app
-9e58e5bd676f  docker.io/library/nginx:stable-alpine3.17  nginx -g daemon o...  9 minutes ago  Up 9 minutes  127.0.0.1:20015->80/tcp  kickstart-app
-```
+In the UI: Kafka, S3, syslog, webhook, Splunk HEC (secrets: `kafka_password`,
+`s3_secret_access_key`, `splunk_token`). Other parsedmarc sections (`gelf`,
+`loki`, `log_analytics`, `postgresql`, extra options like `index_suffix` of a
+section not managed here) go to `state/parsedmarc-extra.ini`, appended to
+every parsedmarc INI; it is backed up. Example:
 
-you can see what environment variable is inside the container
-```
-podman exec  kickstart-app env
-TERM=xterm
-container=podman
-NGINX_VERSION=1.24.0
-PKG_RELEASE=1
-NJS_VERSION=0.7.12
-NGINX_IMAGE=docker.io/nginx:stable-alpine3.17
-CONFIG_DATABASE_URI="postgresql://postgres:Nethesis,1234@127.0.0.1:5432/toto"
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-HOME=/root
-```
+    runagent -m parsedmarc1 sh -c 'umask 077; cat > parsedmarc-extra.ini' <<'EOF'
+    [loki]
+    url = http://loki.example.org:3100
+    EOF
+    runagent -m parsedmarc1 systemctl --user restart 'parsedmarc-watch@*'
 
-you can run a shell inside the container
+A section must not repeat one the UI writes.
 
-```
-podman exec -ti   kickstart-app sh
-/ # 
-```
-## Testing
+## Backup, restore, clone
 
-Test the module using the `test-module.sh` script:
+- Backed up: `state/settings.json`, `state/secrets`, `state/certs`,
+  `state/parsedmarc-extra.ini`, and the volumes `opensearch-snapshots`,
+  `parsedmarc-data`, `grafana-data`. Before each backup,
+  `module-dump-state` takes an OpenSearch snapshot of the report indices and
+  the Dashboards saved objects into `opensearch-snapshots` (only the newest
+  snapshot is kept; snapshots are incremental). The live `opensearch-data`
+  volume is not backed up.
+- Restore: `configure-module` runs with every setting and Let's Encrypt off,
+  then the report indices are restored from the snapshot. Edited Dashboards
+  objects are not restored (the upstream ones are imported again).
+- Clone: core copies the state and every volume while the services are
+  stopped; `configure-module` runs with Let's Encrypt off.
 
+## Services
 
-    ./test-module.sh <NODE_ADDR> ghcr.io/nethserver/kickstart:latest
+`parsedmarc.service` (pod; Requires its children) with `opensearch-app`,
+`dashboards-app`, `grafana-app` (skipped when disabled) and
+`parsedmarc-watch@*.service`. A unit reports started only when its service
+answers: cluster and security index healthy and provisioned, Dashboards
+`/api/status` answering and saved objects imported, Grafana `/api/health`.
+`RestartSec=10`.
 
-The tests are made using [Robot Framework](https://robotframework.org/)
+## Tests
 
-## UI translation
+`tests/` (Robot Framework, QEMU in CI): install, configure with two tenants,
+read-back without secrets, secret file modes, backend health, parsing of the
+upstream sample reports (`tests/fixtures`) through the parsedmarc CLI into
+`acme_*` and `beta_*` indices, tenant isolation, tenant dashboards, Traefik
+and authentication, backup snapshot, removal.
 
-Translated with [Weblate](https://hosted.weblate.org/projects/ns8/).
+## Credits
 
-To setup the translation process:
-
-- add [GitHub Weblate app](https://docs.weblate.org/en/latest/admin/continuous.html#github-setup) to your repository
-- add your repository to [hosted.weblate.org]((https://hosted.weblate.org) or ask a NethServer developer to add it to ns8 Weblate project
+parsedmarc, its dashboards and the sample reports are by Sean Whalen and
+contributors, Apache License 2.0 (`imageroot/share`, `tests/fixtures`).

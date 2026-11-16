@@ -1,17 +1,73 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 #
-# Copyright (C) 2023 Nethesis S.r.l.
+# Copyright (C) 2026 Genius Dynamics
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-set -e
 
-# Redirect any output to the journal (stderr)
-exec 1>&2
+# Start the pod and its children by name; restart only the units whose
+# configuration changed; provision OpenSearch and Dashboards again.
 
-# If the control reaches this step, the service can be enabled and started
+import os
+import subprocess
+import sys
+import agent
+import parsedmarc_ns8 as pdm
 
-touch smarthost.env
 
-systemctl --user enable kickstart.service
-systemctl --user restart kickstart.service
+def sd(*args, check=True):
+    print("systemctl --user " + " ".join(args), file=sys.stderr)
+    res = subprocess.run(["systemctl", "--user", *args], stdout=sys.stderr)
+    if check and res.returncode != 0:
+        raise SystemExit(f"systemctl {' '.join(args)} failed")
+    return res.returncode
+
+
+def active(unit):
+    return subprocess.run(["systemctl", "--user", "-q", "is-active", unit]).returncode == 0
+
+
+settings = pdm.load_settings()
+with open(".restart-units") as fp:
+    changed = {u for u in fp.read().split() if u}
+
+sd("daemon-reload")
+units = ["parsedmarc.service"]
+optional = {
+    "opensearch-app.service": pdm.is_bundled(settings),
+    "dashboards-app.service": pdm.is_bundled(settings) and settings["dashboards_enabled"],
+    "grafana-app.service": settings["grafana_enabled"],
+}
+for unit, on in optional.items():
+    if on:
+        units.append(unit)
+    else:
+        sd("stop", unit, check=False)
+
+watchers = [f"parsedmarc-watch@{i}.service" for i in pdm.mailbox_instances(settings)]
+# Watchers no longer configured
+listing = subprocess.run(["systemctl", "--user", "list-units", "--all", "--plain", "--no-legend",
+                          "parsedmarc-watch@*"], capture_output=True, text=True).stdout
+for line in listing.splitlines():
+    unit = line.split()[0]
+    if unit not in watchers:
+        sd("disable", "--now", unit, check=False)
+
+sd("enable", "parsedmarc.service", *watchers)
+if settings["geoip"] == "maxmind":
+    sd("enable", "--now", "parsedmarc-geoipupdate.timer")
+else:
+    sd("disable", "--now", "parsedmarc-geoipupdate.timer", check=False)
+
+if not active("parsedmarc.service"):
+    sd("restart", *units)
+else:
+    todo = [u for u in units[1:] if u in changed or not active(u)]
+    if todo:
+        sd("restart", *todo)
+    elif pdm.is_bundled(settings):
+        agent.run_helper("pdm-provision").check_returncode()
+todo = [w for w in watchers if w in changed or not active(w)]
+if todo:
+    sd("restart", *todo)
+pdm.remove_file(".restart-units")
