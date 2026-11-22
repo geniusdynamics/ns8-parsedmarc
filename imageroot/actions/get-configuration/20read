@@ -5,14 +5,23 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 
-# The settings, without any secret: each secret is reported as <name>_set
+# The settings, without any secret: each secret is reported as <name>_set.
+# cluster_metrics: the ns8-metrics instance, if any, and its Grafana path
 
 import json
 import os
 import sys
 import agent
 import parsedmarc_ns8 as pdm
+import parsedmarc_metrics as pm
 
 config = pdm.config_view(pdm.load_settings())
 config["lets_encrypt"] = agent.get_route(os.environ["MODULE_ID"]).get("lets_encrypt", False) if config["host"] else False
+# The cluster metrics module (ns8-metrics), for the hints of the UI
+try:
+    config["cluster_metrics"] = pm.cluster_metrics(agent.redis_connect(use_replica=True))
+except Exception as ex:
+    print(agent.SD_WARNING + f"cluster metrics module not checked: {ex}", file=sys.stderr)
+    config["cluster_metrics"] = {"installed": False, "module_id": "", "grafana_path": ""}
+config["cluster_metrics"]["dashboard_uid"] = pm.dashboard_uid(os.environ["MODULE_ID"])
 json.dump(config, fp=sys.stdout)

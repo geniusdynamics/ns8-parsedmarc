@@ -93,6 +93,10 @@
     "grafana_enabled": {
       "type": "boolean"
     },
+    "metrics_enabled": {
+      "type": "boolean",
+      "description": "Export metrics, alert rules and a dashboard to the cluster metrics module (ns8-metrics)"
+    },
     "admin_password": {
       "type": "string",
       "maxLength": 128,
