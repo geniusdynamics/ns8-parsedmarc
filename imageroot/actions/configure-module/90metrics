@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Publish (or remove, with metrics_enabled off) the alert rules and the
+# Grafana dashboard for the cluster metrics module (ns8-metrics). Harmless
+# when it is not installed: it reads the keys whenever it provisions.
+# A failure here does not fail the configuration.
+
+import os
+import sys
+import agent
+import parsedmarc_ns8 as pdm
+import parsedmarc_metrics as pm
+
+settings = pdm.load_settings()
+try:
+    rdb = agent.redis_connect(privileged=True)
+    rules, dash = pm.publish(rdb, os.environ["MODULE_ID"], settings["metrics_enabled"])
+    print(f"cluster metrics: enabled={settings['metrics_enabled']} rules changed={rules} "
+          f"dashboard changed={dash}", file=sys.stderr)
+except Exception as ex:
+    print(agent.SD_WARNING + f"cluster metrics not published: {ex}", file=sys.stderr)

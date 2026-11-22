@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Remove the alert rules and the dashboard of this instance from the
+# cluster metrics module. Its module-removed handler cleans up too; this
+# step makes the removal immediate. Never fails the removal.
+
+import os
+import sys
+import agent
+import parsedmarc_metrics as pm
+
+try:
+    pm.publish(agent.redis_connect(privileged=True), os.environ["MODULE_ID"], False)
+except Exception as ex:
+    print(agent.SD_WARNING + f"cluster metrics not removed: {ex}", file=sys.stderr)

@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# Print the module metrics in the Prometheus text format. The node runs it
+# every 5 minutes (core 3.24.0 or later: runagent -m <module_id>
+# export-metrics) and serves the output through node_exporter, with the
+# module label. It must end within 30 seconds: the queries stop after 20.
+# Nothing is printed when the module is not configured or the metrics are
+# disabled (metrics_enabled): the node then drops the module series.
+#
+#   --force   collect even when metrics_enabled is off (tests, debugging)
+
+import os
+import sys
+
+import parsedmarc_ns8 as pdm
+import parsedmarc_metrics as pm
+
+settings = pdm.load_settings()
+if not settings["host"] or not (settings["metrics_enabled"] or "--force" in sys.argv[1:]):
+    sys.exit(0)
+
+port = None
+if pdm.is_bundled(settings):
+    port = os.environ.get("OPENSEARCH_PORT") or pdm.ports()["opensearch"]
+backend = pm.Backend(settings, pdm.read_secret, opensearch_port=port, ca_file=f"{pdm.CERTS_DIR}/ca.pem")
+samples = pm.collect(settings, backend, pdm.mailbox_instances(settings))
+sys.stdout.write(pm.format_metrics(samples))

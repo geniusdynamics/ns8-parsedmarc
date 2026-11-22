@@ -81,25 +81,106 @@ the full period. 0 keeps everything.
   (`<tenant> dmarc-ag`, `<tenant> dmarc-fo`, and `All ...`), selected in the
   dashboard variables. Authentication: NS8 forward authentication (the
   cluster administrators, as for the Rspamd UI of ns8-mail), passed to
-  Grafana with `auth.proxy`.
+  Grafana with `auth.proxy`. Off by default: with the cluster metrics
+  module, its Grafana shows the overview (see
+  [Cluster metrics](#cluster-metrics-ns8-metrics)).
 
-### Why not the Grafana of ns8-metrics
+## Cluster metrics (ns8-metrics)
 
-ns8-metrics does accept datasources and dashboards from other modules: a
-module writes `module/<id>/metrics_datasources` (YAML) and
-`module/<id>/metrics_dashboards` (JSON) and fires
-`metrics-datasource-changed` / `metrics-dashboard-changed`. It is not used
-because:
+NS8 installs one metrics module per cluster (ns8-metrics: Prometheus,
+Alertmanager and Grafana on the leader node). When `metrics_enabled` is on
+(the default), this module feeds it, so the cluster Grafana and
+Alertmanager show the DMARC state of every instance and the bundled
+Grafana can stay off. Standalone, without ns8-metrics, nothing changes:
+OpenSearch Dashboards and the optional bundled Grafana work as before.
+
+What is published:
+
+- **Metrics**: `bin/export-metrics` prints aggregate counts in the
+  Prometheus text format. The node runs it every 5 minutes
+  (`runagent -m parsedmarc1 export-metrics`, core 3.24.0 or later) and
+  serves the output through its `node_exporter`, which Prometheus already
+  scrapes, with the `module` label (copied to `module_id`). There is no
+  extra port, no listener and no process of the module. The queries use
+  the read-only `grafana` OpenSearch account (or the external account),
+  stop after 20 seconds, and the output never holds a secret, a source
+  address or a message sample. Older cores do not run the command: no
+  metrics, the rest works.
+- **Alert rules**: Redis hash `module/<id>/metrics_alert_rules`, field
+  `parsedmarc`, then the `metrics-alert-rules-changed` event.
+- **Dashboard** "DMARC reports (<id>)": Redis hash
+  `module/<id>/metrics_dashboards`, field `parsedmarc`, uid
+  `parsedmarc-<id>`, then the `metrics-dashboard-changed` event. It uses
+  only the Prometheus datasource of ns8-metrics (uid `prometheus`).
+
+The keys are published by `configure-module` (so also on restore and
+clone) and on update; turning `metrics_enabled` off, or removing the
+module, deletes them. ns8-metrics reads them whenever it provisions, so
+the order of installation does not matter.
+
+Open the dashboard in the cluster Grafana: enable Grafana in the settings
+of the metrics module, then use "Open in the cluster Grafana" on the
+Settings page of this module, or open `https://<leader>/<grafana path>/`
+and search "DMARC". The module Settings page shows whether a metrics
+module was found.
+
+### Metrics
+
+Counts cover a rolling window: reports arrive about one day after the
+period they describe, so a window shorter than a few days would be mostly
+empty. Labels: `tenant` (`default` for the domains of no tenant) and
+`domain` (the domain of the published DMARC policy; at most 500 per
+tenant and report type).
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `parsedmarc_up` | | 1 if the storage answered every query of the last run |
+| `parsedmarc_collect_duration_seconds` | | duration of the last run |
+| `parsedmarc_collect_timestamp_seconds` | | time of the last run (the node keeps the last output of a failed run) |
+| `parsedmarc_aggregate_messages_7d` | tenant, domain, `dmarc` = `pass`/`fail` | messages in the aggregate reports whose period began in the last 7 days |
+| `parsedmarc_aggregate_dkim_aligned_messages_7d` | tenant, domain | of those, with an aligned DKIM pass |
+| `parsedmarc_aggregate_spf_aligned_messages_7d` | tenant, domain | of those, with an aligned SPF pass |
+| `parsedmarc_aggregate_reports_7d` | tenant, domain | aggregate reports of the last 7 days |
+| `parsedmarc_aggregate_last_report_timestamp_seconds` | tenant, domain | end of the newest aggregate report period; domains with reports in the last 30 days |
+| `parsedmarc_failure_reports_7d` | tenant, domain | failure (forensic) reports that arrived in the last 7 days |
+| `parsedmarc_smtp_tls_sessions_7d` | tenant, domain, `result` = `successful`/`failed` | sessions in the SMTP TLS reports of the last 7 days; a report about several policy domains counts for each |
+| `parsedmarc_mailbox_watcher_up` | `mailbox` (`default`, `t-<tenant>`) | 1 if the process reading that mailbox runs |
+
+When the storage does not answer, only `parsedmarc_up 0`, the run time and
+the watcher states are exported: partial counts would look like a drop of
+the traffic.
+
+### Alerts
+
+| Alert | Condition | Severity |
+|---|---|---|
+| `ParsedmarcStorageDown` | `parsedmarc_up == 0` for 15 minutes | critical |
+| `ParsedmarcMetricsStale` | last run older than 30 minutes, for 5 minutes (export-metrics fails or times out: see `journalctl -u refresh-module-metrics`) | warning |
+| `ParsedmarcMailboxWatcherDown` | a mailbox watcher stopped for 15 minutes | warning |
+| `ParsedmarcDmarcFailureRateHigh` | more than 10% of the messages of a domain fail DMARC, with more than 100 messages in 7 days, for 1 hour | warning |
+| `ParsedmarcNoAggregateReport` | no aggregate report about a domain for 72 hours (only domains with reports in the last 30 days), for 1 hour | warning |
+
+ns8-metrics scopes every rule to this instance (`module_id`). Critical
+alerts are mailed when its `mail_to` is set.
+
+### Why no OpenSearch datasource in the cluster Grafana
+
+ns8-metrics also accepts datasources (`module/<id>/metrics_datasources`),
+but an OpenSearch datasource is not used:
 
 1. its Grafana (13.x) no longer bundles the Elasticsearch datasource, and
-   plugin installation is disabled, so the parsedmarc dashboard cannot query
-   anything;
+   plugin installation is disabled, so the upstream parsedmarc dashboard
+   cannot query anything;
 2. the datasource YAML, with the OpenSearch password, would be stored in
    Redis, readable by every module;
 3. that Grafana runs on the leader node only, while the OpenSearch API of
    this module listens on the loopback of its own node.
 
-The bundled Grafana stays on 12.x for the same reason (see `renovate.json`).
+The metrics above avoid the three: counts computed here, no secret in
+Redis, collected on every node by `node_exporter`. The report details
+(sources, DKIM and SPF results, samples) stay in OpenSearch Dashboards, or
+in the bundled Grafana, which stays on 12.x for reason 1 (see
+`renovate.json`).
 
 ## Mailboxes
 
@@ -220,7 +301,17 @@ answers: cluster and security index healthy and provisioned, Dashboards
 read-back without secrets, secret file modes, backend health, parsing of the
 upstream sample reports (`tests/fixtures`) through the parsedmarc CLI into
 `acme_*` and `beta_*` indices, tenant isolation, tenant dashboards, Traefik
-and authentication, backup snapshot, removal.
+and authentication, backup snapshot, cluster metrics (export-metrics
+output, published alert rules and dashboard, rules and series loaded by the
+cluster Prometheus when a metrics module exists, withdrawal), removal.
+
+`tests/unit` (no node needed): exporter output from canned OpenSearch
+responses, queries, alert rules and dashboard, publication in Redis:
+
+    python3 -m unittest discover -s tests/unit -v
+
+With `NS8_METRICS_DIR` pointing to a checkout of ns8-metrics, the alert
+rules also go through its `metrics_alert_rules.py` validation.
 
 ## Credits
 
