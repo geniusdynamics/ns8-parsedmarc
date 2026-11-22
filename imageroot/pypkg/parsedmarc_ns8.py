@@ -79,6 +79,8 @@ DEFAULTS = {
     # Dashboards
     "dashboards_enabled": True,          # OpenSearch Dashboards (bundled backend)
     "grafana_enabled": False,            # bundled Grafana under /grafana
+    # Cluster metrics (ns8-metrics): export-metrics, alert rules, dashboard
+    "metrics_enabled": True,
     # Report types
     "save_aggregate": True,
     "save_failure": True,

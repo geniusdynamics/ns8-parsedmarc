@@ -61,6 +61,28 @@
     "grafana_enabled": {
       "type": "boolean"
     },
+    "metrics_enabled": {
+      "type": "boolean"
+    },
+    "cluster_metrics": {
+      "type": "object",
+      "description": "The cluster metrics module (ns8-metrics) and the dashboard of this instance",
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "module_id": {
+          "type": "string"
+        },
+        "grafana_path": {
+          "type": "string",
+          "description": "Path of its Grafana on the leader node, empty when Grafana is disabled"
+        },
+        "dashboard_uid": {
+          "type": "string"
+        }
+      }
+    },
     "save_aggregate": {
       "type": "boolean"
     },

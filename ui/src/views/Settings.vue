@@ -157,6 +157,49 @@
                 :disabled="busy"
               />
             </template>
+            <h4 class="mg-bottom">{{ $t("settings.metrics") }}</h4>
+            <ConfigField
+              name="metrics_enabled"
+              type="toggle"
+              v-model="cfg.metrics_enabled"
+              :label="$t('settings.metrics_enabled')"
+              :tooltip="$t('settings.metrics_enabled_tooltip')"
+              :disabled="busy"
+            />
+            <NsInlineNotification
+              v-if="clusterMetrics.installed && cfg.metrics_enabled"
+              kind="info"
+              class="maxwidth"
+              :title="$t('settings.cluster_metrics_detected')"
+              :description="
+                $t('settings.cluster_metrics_detected_description', {
+                  module: clusterMetrics.module_id,
+                })
+              "
+              :actionLabel="
+                clusterMetrics.grafana_path
+                  ? $t('settings.open_cluster_dashboard')
+                  : ''
+              "
+              @action="openClusterDashboard"
+              :showCloseButton="false"
+            />
+            <NsInlineNotification
+              v-else-if="clusterMetrics.installed"
+              kind="info"
+              class="maxwidth"
+              :title="$t('settings.cluster_metrics_detected')"
+              :description="$t('settings.cluster_metrics_disabled_description')"
+              :showCloseButton="false"
+            />
+            <NsInlineNotification
+              v-else-if="cfg.metrics_enabled"
+              kind="info"
+              class="maxwidth"
+              :title="$t('settings.cluster_metrics_missing')"
+              :description="$t('settings.cluster_metrics_missing_description')"
+              :showCloseButton="false"
+            />
             <ConfigField
               name="grafana_enabled"
               type="toggle"
@@ -164,6 +207,18 @@
               :label="$t('settings.grafana_enabled')"
               :tooltip="$t('settings.grafana_enabled_tooltip')"
               :disabled="busy"
+            />
+            <NsInlineNotification
+              v-if="
+                clusterMetrics.installed &&
+                cfg.metrics_enabled &&
+                cfg.grafana_enabled
+              "
+              kind="warning"
+              class="maxwidth"
+              :title="$t('settings.grafana_not_needed')"
+              :description="$t('settings.grafana_not_needed_description')"
+              :showCloseButton="false"
             />
 
             <h4 class="mg-bottom">{{ $t("settings.mailbox") }}</h4>
@@ -604,6 +659,7 @@ const FIELDS = [
   "retention_days",
   "dashboards_enabled",
   "grafana_enabled",
+  "metrics_enabled",
   "save_aggregate",
   "save_failure",
   "save_smtp_tls",
@@ -704,6 +760,7 @@ export default {
       ),
       nameserversText: "",
       emailToText: "",
+      clusterMetrics: { installed: false, module_id: "", grafana_path: "" },
       loading: { getConfiguration: true, configureModule: false },
       error: {
         getConfiguration: "",
@@ -806,6 +863,14 @@ export default {
       target.imap_ssl = server.port === 993;
       target.imap_skip_verify = true;
     },
+    openClusterDashboard() {
+      // The cluster Grafana runs on the leader node, which serves this UI
+      const cm = this.clusterMetrics;
+      window.open(
+        `${window.location.origin}/${cm.grafana_path}/d/${cm.dashboard_uid}`,
+        "_blank"
+      );
+    },
     async getConfiguration() {
       this.loading.getConfiguration = true;
       this.error.getConfiguration = "";
@@ -822,6 +887,11 @@ export default {
         }
         this.nameserversText = (config.nameservers || []).join(", ");
         this.emailToText = (config.email_to || []).join(", ");
+        this.clusterMetrics = config.cluster_metrics || {
+          installed: false,
+          module_id: "",
+          grafana_path: "",
+        };
       } catch (failure) {
         this.error.getConfiguration = this.taskErrorMessage(failure);
       }

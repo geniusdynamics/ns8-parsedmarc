@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+
+#
+# Copyright (C) 2026 Genius Dynamics
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+
+# The new image may bring new alert rules or a new dashboard: publish them
+# again (events fire only on changes). Instances installed before the
+# setting existed get metrics_enabled on, its default.
+
+import os
+import sys
+import agent
+import parsedmarc_ns8 as pdm
+import parsedmarc_metrics as pm
+
+settings = pdm.load_settings()
+if not settings["host"]:
+    sys.exit(0)
+try:
+    pm.publish(agent.redis_connect(privileged=True), os.environ["MODULE_ID"], settings["metrics_enabled"])
+except Exception as ex:
+    print(agent.SD_WARNING + f"cluster metrics not published: {ex}", file=sys.stderr)
